@@ -1,0 +1,23 @@
+# $Id: Makefile.in 590894 2019-08-07 14:59:53Z camacho $
+
+# Meta-makefile("APP" project)
+#################################
+
+REQUIRES = objects algo
+
+LIB_PROJ = blast_app_util
+
+APP_PROJ = \
+blastp \
+
+USR_PROJ = legacy_blast update_blastdb get_species_taxids cleanup-blastdb-volumes
+
+srcdir = @srcdir@
+include @builddir@/Makefile.meta
+
+.PHONY: all $(APP_PROJ)
+
+lib:
+	${MAKE} ${MFLAGS} -f Makefile.blast_app_util_lib
+blastp: lib
+	${MAKE} ${MFLAGS} -f Makefile.blastp_app

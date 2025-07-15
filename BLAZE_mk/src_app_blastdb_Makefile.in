@@ -1,0 +1,16 @@
+# $Id: Makefile.in 574775 2018-11-19 15:21:37Z zaretska $
+
+# Meta-makefile("APP" project)
+#################################
+
+REQUIRES = objects algo
+
+APP_PROJ = makeblastdb 
+srcdir = @srcdir@
+include @builddir@/Makefile.meta
+
+.PHONY: all $(APP_PROJ)
+
+makeblastdb:
+	${MAKE} ${MFLAGS} -f Makefile.makeblastdb_app
+

@@ -174,7 +174,7 @@ cp "$WORK_DIR/BLAZE_gpu/gpu_cpu_common.h" "$CPP_DIR/include/algo/blast/core/"
 mkdir -p $CPP_DIR/src/algo/blast/gpu/
 
 #Copy the source files to the src directory
-cp "$WORK_DIR/BLAZE_gpu/gpuSeedCount.cu" "$CPP_DIR/src/algo/blast/gpu/gpuSeedCount.cu"
+cp "$WORK_DIR/BLAZE_gpu/gpuBLAZE.cu" "$CPP_DIR/src/algo/blast/gpu/gpuBLAZE.cu"
 cp "$WORK_DIR/BLAZE_gpu/util.hpp" "$CPP_DIR/src/algo/blast/gpu/util.hpp"
 
 echo "----------------------------------------"
@@ -213,13 +213,13 @@ echo "----------------------------------------"
 CPP_DIR="$WORK_DIR/$NCBI_VERSION/c++"
 
 # Check the source file exists
-if [ ! -f "$CPP_DIR/src/algo/blast/gpu/gpuSeedCount.cu" ]; then
-    echo "Error: Source file gpuSeedCount.cu not found at $CPP_DIR/src/algo/blast/gpu/gpuSeedCount.cu"
+if [ ! -f "$CPP_DIR/src/algo/blast/gpu/gpuBLAZE.cu" ]; then
+    echo "Error: Source file gpuBLAZE.cu not found at $CPP_DIR/src/algo/blast/gpu/gpuBLAZE.cu"
     exit 1
 fi
 
 echo "Info: Compiling for CUDA architecture compute_86, code sm_86"
-$NVCC --extra-device-vectorization --use_fast_math -O3 -c -gencode arch=compute_86,code=sm_86 --compiler-options -fPIC --compiler-options -fno-strict-aliasing --compiler-options -fno-inline -DUNIX -O3 --no-align-double -L /lib64  -lusb-1.0 -l pthread -shared  $CPP_DIR/src/algo/blast/gpu/gpuSeedCount.cu -o blazeog.o -I$CPP_DIR/include/ -I$CPP_DIR/ReleaseMT/inc/ > compile_gpuSeedCount.log 2>&1
+$NVCC --extra-device-vectorization --use_fast_math -O3 -c -gencode arch=compute_86,code=sm_86 --compiler-options -fPIC --compiler-options -fno-strict-aliasing --compiler-options -fno-inline -DUNIX -O3 --no-align-double -L /lib64  -lusb-1.0 -l pthread -shared  $CPP_DIR/src/algo/blast/gpu/gpuBLAZE.cu -o blazeog.o -I$CPP_DIR/include/ -I$CPP_DIR/ReleaseMT/inc/ > compile_gpuSeedCount.log 2>&1
 
 if [ $? -ne 0 ]; then
   echo -e "\033[31m [!!ERROR!!] Compile failed, check CUDA code\033[0m"

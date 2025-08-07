@@ -96,269 +96,6 @@ __device__ inline unsigned generateMask(int laneID) {
 }
 
 __inline__ __device__
-unsigned restrictKernel(const char *A, const char *B, int M, int N, BlastGapDP * score_array, bool reverse_sequence){
-
-    // Return if either of the sequence is greater than 256
-    // if(M > 256 || N > 256){
-    //     return 0;
-    // }
-
-
-    int sizeA = M;
-    int sizeB = N;
-
-    // Get the thread id
-    int tid = threadIdx.x;
-
-    // laneID within the warp
-    int laneID = tid % WARP_SIZE;
-
-    int warpID = tid / WARP_SIZE;
-
-    char * A_block = (char *)A;
-    char * B_block = (char *)B;
-    char * tempBlockPtr;
-
-    // min of A and B
-    int minAB = min(sizeA, sizeB);
-    int maxAB = max(sizeA, sizeB);
-
-    if(minAB == sizeA){
-        tempBlockPtr = A_block;
-        A_block = B_block;
-        B_block = tempBlockPtr;
-        // swap the sizes
-        int tempSize = sizeA;
-        sizeA = sizeB;
-        sizeB = tempSize;
-    }
-
-
-    // // Print the sequences using thread thread zero of warp zero
-    // if(tid == 0 ){
-    //     printf("A(%d): ", sizeA);
-    //     for(int i=0;i<=sizeA;i++){
-    //         printf("%d,", (int)(A_block[i]));
-    //     }
-    //     printf("\n");
-
-    //     printf("B(%d): ", sizeB);
-    //     for(int i=0;i<=sizeB;i++){
-    //         printf("%d,", (int)(B_block[i]));
-    //     }
-    //     printf("\n");
-    // }
-
-    int sweepcnt = ceil(((double)maxAB/(double)WARP_SIZE));
-
-    // Print the sweep count
-    int temp1 = 0;
-    int temp2 = 0;
-
-    int globalMax = 0;          // globalMax is the maximum score encountered in the DP calculation.
-
-    int score;
-    int score_gap_row;
-    int score_gap_col;
-    int next_score;
-    int best_score = MININT;
-
-    score = -GAP_OPEN_EXTEND;
-    score_array[0].best = 0;
-    score_array[0].best_gap = -GAP_OPEN_EXTEND;
-
-    //TODO: Can definitely parallelize this one!
-    for (int i = 1; i <= minAB; i++) {
-
-        if (score < -X_DROPOFF){
-            // break;
-            score_array[i].best = MININT;
-            score_array[i].best_gap = MININT;
-        }else{
-            score_array[i].best = score;
-            score_array[i].best_gap = score - GAP_OPEN_EXTEND;
-            score -= GAP_EXTEND;
-        }
-    }
-
-    __syncwarp();
-
-    int b_gap = 0;
-
-    int best_prev = 0;
-    int bestgap_prev = 0;
-
-    for(int e=0;e<sweepcnt;e++){
-
-        // Reset the score and the score_gap_row
-        score = MININT;
-        score_gap_row = MININT;
-
-        // Get the best score from thread 31 and assign it to all
-        best_score = __shfl_sync(0xffffffff, best_score, 31);
-
-        for(int x=(e*WARP_SIZE); x < (e*WARP_SIZE + WARP_SIZE + minAB); x++){
-        
-            int i = e*WARP_SIZE + laneID;
-            int j = x - i;
-
-            temp1 = __shfl_up_sync(0xffffffff, best_prev, 1, 32);
-            temp2 = __shfl_up_sync(0xffffffff, bestgap_prev, 1, 32);
-
-            int tmp_best_score = __shfl_up_sync(0xffffffff, best_score, 1, 32);
-
-            if(laneID != 0){
-                best_score = max(tmp_best_score, best_score); // only update the bes score from previous threads if it is better than what you found!
-            }
-
-            if(!(i < 0 || ( (i + 1) > maxAB) || j < 0 || (j + 1) > minAB)){
-
-                int i_temp = i + 1;
-                int b_index = j;
-
-                if(laneID == 0){
-                    next_score = score_array[b_index].best;
-                    score_gap_col = score_array[b_index].best_gap;
-                }
-                else{
-                    next_score = temp1;
-                    score_gap_col = temp2;
-                }
-
-                if(reverse_sequence){
-                    next_score += score_matrix[A_block[maxAB - i_temp]][B_block[ minAB - (b_index+1)]];
-
-                }else{
-                    next_score += score_matrix[A_block[i_temp]][B_block[b_index+1]];
-                }
-
-                //next_score += score_matrix[A_block[i_temp]][B_block[b_index+1]];
-
-                if (i_temp % RESTRICT_SIZE != 0) {
-
-                    if (b_index % RESTRICT_SIZE != 0) {
-
-                        /* the majority of cases fall here; a gap
-                        may not start in either A or B */
-
-                        if (best_score - score > X_DROPOFF) {
-                            best_prev = MININT;
-                        }
-                        else {
-
-                            if (score > best_score) {
-                                best_score = score;
-                            }
-                            best_prev = score;
-                        }
-                    }
-                    else {
-                        b_gap += RESTRICT_SIZE;
-
-                        if (score < score_gap_col)
-                            score = score_gap_col;
-
-                        if (best_score - score > X_DROPOFF) {
-                            best_prev = MININT;
-                        }
-                        else {
-                            if (score > best_score) {
-                                best_score = score;
-                            }
-
-                            score_gap_col -= GAP_EXTEND;
-                            bestgap_prev = max(score - GAP_OPEN_EXTEND, score_gap_col);
-                            best_prev = score;
-
-                        }
-                    }
-
-
-
-                }
-                else{
-
-                    //if (b_index != b_gap) {
-                    if (b_index % RESTRICT_SIZE != 0) {
-
-                        /* gap may not start in B. Compute
-                            the resulting two-term recurrence */
-
-                        if (score < score_gap_row)
-                            score = score_gap_row;
-
-                        if (best_score - score > X_DROPOFF) {
-                            best_prev = MININT;
-                        }
-                        else {
-
-                            if (score > best_score) {
-                                best_score = score;
-                            }
-
-                            score_gap_row -= GAP_EXTEND;
-                            score_gap_row = max(score - GAP_OPEN_EXTEND, score_gap_row);
-                            best_prev = score;
-                        }
-                    }
-                    else {
-
-                        /* the ordinary case: a gap may start in A
-                            or B and the full three-term recurrence
-                            must be computed. This happens once every
-                            RESTRICT_SIZE*RESTRICT_SIZE cells */
-
-                        b_gap += RESTRICT_SIZE;
-                        //score_gap_col = score_array[b_index].best_gap;
-
-                        if (score < score_gap_col)
-                            score = score_gap_col;
-                        if (score < score_gap_row)
-                            score = score_gap_row;
-
-                        if (best_score - score > X_DROPOFF) {
-                            best_prev = MININT;
-                        }
-                        else {
-                            if (score > best_score) {
-                                best_score = score;
-                            }
-
-                            score_gap_row -= GAP_EXTEND;
-                            score_gap_col -= GAP_EXTEND;
-                            bestgap_prev = max(score - GAP_OPEN_EXTEND, score_gap_col);
-                            score_gap_row = max(score - GAP_OPEN_EXTEND,
-                                                score_gap_row);
-                            best_prev = score;
-                        }
-
-                    }
-
-                }
-
-                score = next_score;
-
-                if(laneID == 31){
-                    score_array[b_index].best = best_prev;
-                    score_array[b_index].best_gap = bestgap_prev;
-                }
-
-            }
-
-
-        }
-
-        
-    }
-
-    // holds the global maximum across all threads
-    globalMax = __reduce_max_sync( 0xFFFFFFFF, best_score);
-
-    return globalMax;
-    
-}
-
-__inline__ __device__
 unsigned semiGappedKernelLeft(const char *A, const char *B, int M, int N, BlastGapDP * score_array, bool reverse_sequence){
 
     int sizeA = M;
@@ -392,7 +129,6 @@ unsigned semiGappedKernelLeft(const char *A, const char *B, int M, int N, BlastG
 
     int sweepcnt = ceil(((double)maxAB/(double)WARP_SIZE));
 
-    // Print the sweep count
     int temp1 = 0;
     int temp2 = 0;
 
@@ -554,7 +290,6 @@ unsigned semiGappedKernelRight(const char *A, const char *B, int M, int N, Blast
 
     int sweepcnt = ceil(((double)maxAB/(double)WARP_SIZE));
 
-    // Print the sweep count
     int temp1 = 0;
     int temp2 = 0;
 
@@ -721,14 +456,6 @@ void s_BlastAaExtendLeft( const char * s, const char * q, uint16_t s_off, uint16
             }
 
             localScore += prevScore;
-
-            // // For the debug problems print the local score and the j and the laneID in this format "score: 11, matrix[q[i]][s[i]]: 11, i: 114"
-            // if(problemID == DEBUG_PROBLEM && s_off == S_OFF && q_off == Q_OFF){
-            //     printf("score: %d, matrix[q[i]][s[i]]: %d, i: %d\n", localScore, score_matrix[q[j]][s[j]], j);
-            // }
-
-            // Print the calc score score matrix vlaue and the j and the laneID in this format "score: 11, matrix[q[i]][s[i]]: 11, i: 114"
-            //printf("Localscore: %d, matrix[q[i]][s[i]]: %d, i: %d\n", localScore, (valid ? score_matrix[qt[j]][st[j]] : MININT), j);
             
             if(laneID == 0)
             personalMax = max(personalMax, localScore);  // initial value for each thread
@@ -742,9 +469,6 @@ void s_BlastAaExtendLeft( const char * s, const char * q, uint16_t s_off, uint16
                     personalMax = max(personalMax, candidate);
                 }
             }
-
-            // Print the personal max, personal max D and j
-            //printf("personalMax: %d, personalMaxD: %d, j: %d\n", personalMax, personalMaxD, j);
 
             // The current score is the same as personalMax
             unsigned drop_mask = __ballot_sync(valid_mask, ((personalMax - localScore) >= dropoff) ); // This is the dropflag array from the "cuBLASTP Paper"
@@ -831,9 +555,6 @@ void s_BlastAaExtendRight( const char * st, const char * qt, uint16_t s_off, uin
     for(int l=0;l<loopcnt;l++){
         
         int j = l*WARP_SIZE + laneID;
-
-        //if(problemID == DEBUG_PROBLEM && s_off == S_OFF && q_off == Q_OFF){
-            //printf("personalMax: %d, personalMaxD: %d, j: %d\n", personalMax, personalMaxD, j);
         
             bool valid = j < n;
 
@@ -851,9 +572,6 @@ void s_BlastAaExtendRight( const char * st, const char * qt, uint16_t s_off, uin
             }
 
             localScore += prevScore;
-
-            // Print the calc score score matrix vlaue and the j and the laneID in this format "score: 11, matrix[q[i]][s[i]]: 11, i: 114"
-            //printf("Localscore: %d, matrix[q[i]][s[i]]: %d, i: %d\n", localScore, (valid ? score_matrix[qt[j]][st[j]] : MININT), j);
             
             if(laneID == 0)
             personalMax = max(personalMax, localScore);  // initial value for each thread
@@ -868,29 +586,14 @@ void s_BlastAaExtendRight( const char * st, const char * qt, uint16_t s_off, uin
                 }
             }
 
-            // Print the personal max, personal max D and j
-            //printf("personalMax: %d, personalMaxD: %d, j: %d\n", personalMax, personalMaxD, j);
-
             // The current score is the same as personalMax
             unsigned drop_mask = __ballot_sync(valid_mask, ((localScore <= 0) || (personalMax - localScore) >= dropoff) ); // This is the dropflag array from the "cuBLASTP Paper"
             unsigned non_zero_dm = __ffs(drop_mask) - 1;
 
             if(drop_mask != 0){
-                // This means that some thread has called terminate. So you have to break out of the loop
-                // However the only think you need to terminate is the previouis best score and its index position.
-                // Broadcast the currentLocalMax of the termination calling thread to all threads in the warp.
-                // This is the max score, check if this score matches with previous max score, if it does then you can report the previous max score and its index,
-                // Else check which scores in the current iteration match the currentLocalMax of the terminating thread and report its offset to all the threads in the warp.
-                // USe the thread 0 to update the final pointer variable.
-                
-                // Step 1. Find the index of the first thread that called it quits.
-                // Print non_zero_dm and j and laneID
-                //printf("dropoff was %d and maxVal %d and non_zero_dm: %d, j: %d, laneID: %d\n", dropoff, globalMax, non_zero_dm, j, laneID);
                 
                 // Broadcast the currentLocalMax from the thread that called it quits to all threads in the warp.
                 int theAbsoluteMax = __shfl_sync(0xFFFFFFFF, personalMax, non_zero_dm); // this is the score that is broarcast to everyone in the warp.
-                // Print the absolute max
-                //printf("theAbsoluteMax: %d and laneID: %d\n", theAbsoluteMax, laneID);
                 
                 // Check if the absolute max is different than the global Max,
                 if(theAbsoluteMax == globalMax){
@@ -898,14 +601,8 @@ void s_BlastAaExtendRight( const char * st, const char * qt, uint16_t s_off, uin
                     right_d = globalMaxD + 1;
                     right_score = globalMax;
                     
-                    // Print that the score was the old score so you do not have to update it.
-                    //printf("The score was the old score so you do not have to update it\n");
                     break;
                 }else{
-
-                    // Print that the score was the new score so you have to update it.
-                    //printf("The score was the new score so you have to update it\n");
-
                     // Get a mask of all threads lesser than or equal to the thread calling it quits that have a score equal to the absolute max.
                     // Generate a mask of all threads less than or equal to the calling thread.
                     unsigned tmask = generateMask(non_zero_dm); // This is the mask of all threads less than or equal to the calling thread.
@@ -919,18 +616,10 @@ void s_BlastAaExtendRight( const char * st, const char * qt, uint16_t s_off, uin
                     right_score = theAbsoluteMax; // This is the score that is broadcast to all threads in the warp.
                     right_d = l*WARP_SIZE + tempID + 1;
 
-                    // Print the tempID, the absolute max score and the right_d
-                    //printf("tempID: %d, theAbsoluteMax: %d and right_d: %d\n", tempID, theAbsoluteMax, right_d);
-
                     break;
                 }
         
             }else{
-                // SO in this iteration the drop was not called. So you will have to get the max score from thread 31 and broadcast it to all threads.
-                // If this is equal to the previous max score then you do not update the max score and the index, 
-                // Else check which is the first thread in the warp with the same score as the thread 31's amx score and update the global max for all threads and the index for all threads.
-                // There can be anotehr corner case situation where this might be the last iteration, in that case the last thread might nit be thread 31. In that case you are going to get the Index of the last
-                // Active thread in the warp and not the thread 31. So you have to check if the last thread is the thread 31 or not.
                 // Get the maxscore from thread 31
                 int thread31_max = __shfl_sync(0xFFFFFFFF, personalMax, 31); // this is the max score that is broadcast to all threads in the warp.
     
@@ -944,7 +633,6 @@ void s_BlastAaExtendRight( const char * st, const char * qt, uint16_t s_off, uin
                     globalMaxD = l*WARP_SIZE + maxID; // This is the index of the first thread in the warp with the same score as thread 31.
                     // If this is the last iteration then you just return the global max score and the index.
                     
-
                 } //else when they are equal do not have to update the max value
 
                 if(l == loopcnt-1){
@@ -953,262 +641,17 @@ void s_BlastAaExtendRight( const char * st, const char * qt, uint16_t s_off, uin
                     break;
                 }
 
-                // But you still have to update the previous score and the personal max score.
-                //prevScore = __shfl_sync(active, calcScore, (31 - __clz(active))); // this is the cumulative SUM
-                // Broadcast the calcScore from the 31st thread to all other threads, and if the last thread is not 31
-                // you are in the last iteration anyway, so whatever you do here is not going to matter anyways.
                 prevScore = __shfl_sync(0xFFFFFFFF, localScore, (warpSize - 1)); // this is the cumulative SUM
                 personalMax = __shfl_sync(0xFFFFFFFF, personalMax, (warpSize - 1)); // this is the cumulative SUM
-                
-                // Print the prevScore
-                //printf("prevScore: %d and laneID: %d\n", prevScore, laneID);
 
             }    
         
-        //}
-
-    //     if(j >= n){
-
-    //         // Maybe here I have to check for the active mask, if all the threads are there only then you update it, else someone else will do it for you!
-    //         right_d = globalMaxD + 1;
-    //         right_score = globalMax;
-
-    //         if(right_score < 0)
-    //             right_score = 0;
-
-    //         break;
-    //     }
-
-    //     int calcScore = score_matrix[qt[j]][st[j]]; // This gets the current score for the protein alphabet
-
-    //     int active = __activemask();        // Gets the mask of threads that are active
-        
-    //     for (int offset = 1; offset < warpSize; offset *= 2) { // This essentailly calculates the prefix sum by staggering the computation into log number of lops.
-    //         int value = __shfl_up_sync(active, calcScore, offset);
-    //         if (laneID >= offset) {
-    //             calcScore += value;
-    //         }
-    //     }
-
-    //     calcScore += prevScore;
-
-    //     int maxVal = __reduce_max_sync(active, calcScore); // Gets the maximum score, which includes the cumulative sum.
-
-    //     globalMax = max(globalMax, maxVal); // check if the max you just found is greater than the current max, this score is retained across the various threads as technically the max value is and it is broadcast across the entire warp.
-
-    //     // Broadcast the calcScore from last active thread to all other threads
-    //     prevScore = __shfl_sync(active, calcScore, (31 - __clz(active))); // this is the cumulative SUM
-
-    //     unsigned mask = __ballot_sync(active, calcScore == globalMax); // Get the mask of threads, which have scores equal to the glibal max.
-
-    //     uint8_t maxID = __ffs(mask) - 1; // Find the first non-zero bit in the mask // You get the ID of the first thread for which this is true.
-
-    //     if(maxVal == globalMax){
-    //         globalMaxD = l*WARP_SIZE + maxID; // Even this is this guaranteed that everyone has the same score???? Makes sense as everyone calculates the same maxID.
-    //     }
-
-    //     mask = __ballot_sync(active, laneID > maxID); // Find all the threads that have a higher thread ID than the thread with the max value, this is very important. Do I really need to check ONLY after the maxID? Essentially I need this to be zero. TODO: Might need to modify this. This is because thread zero is going to be skipped even if the maxID is zero. 
-    //     // So there should be some form of checking to make sure that all threads are participaint in this dropoff thresholding in the circumstance in which you do not update the max score? Maybe not, maybe you do not have to? But I will fix this first and only after I KNOW that I have everything working is when I will try to remove the probably redundant checks.
-        
-    //     // [TODO:] One plaguing question I have is, in the situation where none of them are equal, Essentially in the situation in which you do not improve the best score you have seen in a particular iteration.
-    //     // I strongly belive that this should be fixed. I belive that I am lucking out in this situation. 
-    //     // This should address that situation!
-    //     if(maxID == 255){
-    //         mask = active;
-    //     }
-
-    //     uint32_t activeMask = mask;
-
-    //     //mask = __ballot_sync(mask, ((calcScore <= 0) || (calcScore - maxVal) < dropoff) ); // This is the dropflag array from the "cuBLASTP Paper"
-
-    //     mask = __ballot_sync(mask, ((calcScore <= 0) || (globalMax - calcScore) >= dropoff) ); // This is the dropflag array from the "cuBLASTP Paper"
-
-    //     mask = mask & activeMask;
-
-    //     if (mask != 0) {
-
-    //         right_d = globalMaxD + 1;
-    //         right_score = globalMax;
-
-    //         // If the problem number is the debug problem then print the query_offset, subject_offset, left_d, left_score.
-    //         if(right_score < 0)
-    //             right_score = 0;
-
-    //         break; // Break out of the loop if you meet the dropoff condition  
-    //     }
-
-    //     // If you are on the last iteration of the loop that means that you reached the end of the loop and you still havent met the dropoff condition
-    //     // So report the right_d as the l*WARP_SIZE + (31 - __clz(mask)) and the right_score as the maxVal
-    //     if(l == loopcnt-1){
-
-    //         right_d = globalMaxD + 1;
-    //         right_score = globalMax;
-
-    //         if(right_score < 0)
-    //             right_score = 0;
-
-    //     }
-
     }
 
     __syncwarp();
 
     *right_d_o = __shfl_sync(0xFFFFFFFF, right_d, 0);
     *right_score_o = __shfl_sync(0xFFFFFFFF, right_score, 0); 
-
-}
-
-// This is the function for right extension
-__forceinline__ __device__ int o_BlastAaExtendRight( int bmatrix[][28], uint8_t * subject, char * query, uint32_t subject_length , uint32_t query_length , uint32_t s_off, uint32_t q_off, int bdropoff, int * blen, int maxscore, uint32_t * s_last_off, uint tid)
-{
-
-    int i, n, best_i = -1;
-    int score = maxscore;
-
-    n = min(subject_length - s_off, query_length - q_off);
-
-    #ifdef UG_DEBUG
-    int searchSpace = n;
-    #endif
-
-    char * s = (char *) subject;
-    char * q = (char *) query;
-
-    s += s_off;
-    q += q_off;
-
-    for (i = 0; i < n; i++) {
-        score += bmatrix[q[i]][s[i]];
-
-        if (score > maxscore) {
-            maxscore = score;
-            best_i = i;
-        }
-
-        /* The comparison below is really >= and is different than the old
-           code (e.g., blast.c:BlastWordExtend_prelim). In the old code the
-           loop continued as long as sum > X (X being negative).  The loop
-           control here is different and we *break out* when the if statement 
-           below is true. */
-        if (score <= 0 || (maxscore - score) >= bdropoff){
-
-            #ifdef UG_DEBUG
-            searchSpace = i;
-            #endif
-
-            break;
-        }
-        
-    }
-
-    // only if #UG_DEBUG is defined print the following
-    #ifdef UG_DEBUG
-    if(tid == probDebug)
-        printf("ugextr:%d,%d(%d)\n",best_i + 1, searchSpace + 1, tid);
-    #endif
-
-    *blen = best_i + 1;
-    *s_last_off = s_off + i;
-    return maxscore;
-
-
-}
-
-// This is the function for left extension
-__forceinline__ __device__ int o_BlastAaExtendLeft( int matrix[][28], uint8_t * subject, char * query, uint32_t s_off, uint32_t q_off, int bdropoff, int * length, int maxscore, uint tid){
-
-        int i, n, best_i;
-        int score = maxscore;
-        
-        n = min((uint)s_off,(uint)q_off);
-        best_i = n + 1;
-
-        #ifdef UG_DEBUG
-        int searchSpace = 0;
-        #endif
-
-        char * s = (char *) subject;
-        char * q = (char *) query;
-
-        s += s_off - n;
-        q += q_off - n;
-        
-        for (i = n; i >= 0; i--){
-
-            score += matrix[q[i]][s[i]];
-
-            if (score > maxscore){
-                maxscore = score;
-                best_i = i;
-            }
-            /* The comparison below is really >= and is different than the old
-           code (e.g., blast.c:BlastWordExtend_prelim). In the old code the
-           loop continued as long as sum > X (X being negative).  The loop
-           control here is different and we *break out* when the if statement 
-           below is true. */
-           if ((maxscore - score) >= bdropoff)
-           {
-            #ifdef UG_DEBUG
-            searchSpace = i; // [SCG]
-            #endif
-            
-            break;
-           }
-            
-        }
-
-        #ifdef UG_DEBUG
-        if(tid == probDebug)
-            printf("ugextl:%d,%d(%d)\n", n - best_i + 1, n - searchSpace + 1, tid);
-        #endif
-
-        *length = n - best_i + 1;
-        return maxscore;
-
-}
-
-
-// This is the two hit extension function
-__forceinline__ __device__ int s_BlastAaExtendTwoHit(int matrix[][28], uint8_t * subject, char * query, uint32_t subject_length, uint32_t query_length , uint32_t s_left_off, uint32_t s_right_off, uint32_t q_right_off, int bdropoff, bool * right_extend, uint32_t * s_last_off, uint tid, int * right_d, int * left_d){
-
-    // These are char because maximum length I can have is 255, will have to change this!
-    //int left_d = 0;
-    *left_d = 0;
-    *right_d = 0;
-    //score = 0;
-    //int right_d = 0;
-    int left_score = 0;
-    int right_score = 0;
-    int score = 0;
-    int i = 0;
-
-    for(i=0;i< wordsize; i++){
-        // Calculate the score
-        score += matrix[query[q_right_off+i]][subject[s_right_off+i]];
-
-        // update the score
-        if(score > left_score){
-            left_score = score;
-            *right_d = i + 1;
-        }
-
-    }
-
-    q_right_off += *right_d;
-    s_right_off += *right_d;
-
-    *right_d = 0;
-    *s_last_off = s_right_off;
-
-    left_score = o_BlastAaExtendLeft(matrix, subject, query, s_right_off - 1, q_right_off - 1, bdropoff, left_d, 0, tid);
-
-    /* Extend to the right only if left extension reached the first hit. */
-    if (*left_d >= (s_right_off - s_left_off)) {
-        *right_extend = true;
-        right_score = o_BlastAaExtendRight(matrix, subject, query, subject_length, query_length, s_right_off, q_right_off, bdropoff, right_d, left_score, s_last_off, tid);
-    }
-
-    return (max(left_score,right_score));
 
 }
 
@@ -1301,7 +744,6 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
         // Using a ballot to get the mask of all threads in the warp that have a seed
         unsigned valid_seed_mask = __ballot_sync(0xFFFFFFFF, (seed != 0));
         
-        // If there are valid seeds then for the debug problem print the query and subject offset
         if(valid_seed_mask){
             int pos = __popc(valid_seed_mask & ((1 << laneID) - 1));
             uint32_t threadIndex = pos + seedOffset;
@@ -1336,20 +778,10 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
 
         seed = 0;
 
-        // YOu know that you do not have to go into the global memory if not!
         if(bitsetByte & (1 << bitIndex)){
-
-            // Each thread looks up the index
-            //uint16_t query_lookup_val = query_lookup[index];
-            //uint16_t query_prefix_val = query_prefix[index];
-            //uint16_t query_lookup_val = query_prefix[index+1] - query_prefix_val;
 
             uint16_t query_prefix_val = query_prefix[index];
             uint16_t query_lookup_val = query_prefix[index+1] - query_prefix_val;
-
-            // uint16_t query_prefix_val = seed_holder[index];
-            // uint16_t query_lookup_val = seed_holder[index+1] - query_prefix_val;
-
 
 
             if(query_lookup_val > WARP_SIZE){
@@ -1397,12 +829,10 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
         
     }
 
-
     // Account for the seeds that are found in the last iteration
     // Using a ballot to get the mask of all threads in the warp that have a seed
     unsigned valid_seed_mask = __ballot_sync(0xFFFFFFFF, (seed != 0));
         
-    // If there are valid seeds then for the debug problem print the query and subject offset
     if(valid_seed_mask){
         int pos = __popc(valid_seed_mask & ((1 << laneID) - 1));
         uint32_t threadIndex = pos + seedOffset;
@@ -1446,11 +876,7 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
 
         uint8_t warpSeedCnt = warpTotals[w];
 
-        //////////////////////////////// IMP /////////////////////////////////////////////////////////////
-        /////////////////////////////// HARDCOADED VALUE ////////////////////////////////////////////////
         uint warpResponsibility = ceil(warpSeedCnt/(float)T_WARPS_PER_BLOCK_FLOAT);
-        ////////////////////////////////////////////////////////////////////////////////////////////////
-        ////////////////////////////////////////////////////////////////////////////////////////////////
 
         // Loop over the warpResponsibility for each warp
         for(uint wr = 0; wr < warpResponsibility; wr++){
@@ -1583,7 +1009,6 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
 
         int seedCount = 0;
 
-
         // For all the warps in the block iterate over the final seeds array and if
         // the element is not zero then write it to the gappedSeeds array
         for(int i=0;i<T_WARPS_PER_BLOCK;i++){
@@ -1698,44 +1123,13 @@ __global__ void gpuBLAZE_everything(uint8_t * gpuDbArray, uint32_t * gpuSequence
 
         int gapped_right = 0;
         int gapped_left = 0;
-        // bool isRestricted = false;
-        // int restricted_cutoff = kRestrictedMult * gapped_cutoff;
-
-        // if(ungapped_score < restricted_cutoff){
-        //     isRestricted = true;
-        // }
-
-        // // Restricted
-        // if( isRestricted ){
-        //     gapped_left = restrictKernel(q, s, q_length, s_length, &score_array[warpID][0], 1);
-        //     if (q_length < gpuQueryLength && s_length < seqLen) {
-        //         gapped_right = restrictKernel(q+q_length-1, s+s_length-1, gpuQueryLength-q_length, seqLen-s_length, &score_array[warpID][0], 0);
-        //     }
-
-        // }else{
 
         gapped_left = semiGappedKernelLeft(q, s, q_length, s_length, &score_array[warpID][0], 1);
         if (q_length < gpuQueryLength && s_length < seqLen) {
             gapped_right = semiGappedKernelRight(q+q_length-1, s+s_length-1, gpuQueryLength-q_length, seqLen-s_length, &score_array[warpID][0], 0);
         }
 
-        //}
-
         int totalScore = gapped_left + gapped_right;
-
-        // // This results in some ambiguity so you have to mak this for recomputation!
-        // if(isRestricted &&
-        // totalScore < gapped_cutoff &&
-        // totalScore >= restricted_cutoff){
-
-        //     gapped_right = 0;
-        //     gapped_left = semiGappedKernel(q, s, q_length, s_length, &score_array[warpID][0], 1);
-        //     if (q_length < gpuQueryLength && s_length < seqLen) {
-        //         gapped_right = semiGappedKernel(q+q_length-1, s+s_length-1, gpuQueryLength-q_length, seqLen-s_length, &score_array[warpID][0], 0);
-        //     }
-        //     totalScore = gapped_left + gapped_right;
-        //     //gappedExtension = 1;
-        // }
 
         if(totalScore >= gapped_cutoff){
             gappedExtension = 1;
@@ -1747,11 +1141,6 @@ __global__ void gpuBLAZE_everything(uint8_t * gpuDbArray, uint32_t * gpuSequence
 
             //break;
         }
-
-        // // fOR THE DEBUG PROBLEM PRINT THE gapped_left and gapped_right score and the q_length and s_length
-        // if(streamID+blockIdx.x == DEBUG_PROBLEM && laneID == 0){
-        //     printf("gapped_left: %d, gapped_right: %d, q_length: %d, s_length: %d and gapped extension %d\n", gapped_left, gapped_right, q_length, s_length, gappedExtension);
-        // }
 
         __syncwarp();       
 
@@ -1784,15 +1173,6 @@ __global__ void gpuBLAZE_everything(uint8_t * gpuDbArray, uint32_t * gpuSequence
                 break;
             }
         }
-
-        // if(streamID+blockIdx.x == DEBUG_PROBLEM && laneID == 0){
-        //     // Print that you found a gapped extesion for this seed iuncluding the debug problem and tmp values
-        //     printf("Found a gapped extension for this seed, streamID: %d, blockIdx.x: %d, tmp: %d\n", streamID+blockIdx.x, blockIdx.x, tmp);
-        //     // Print the warp gapped extension and warp totals
-        //     for(int i=0;i<T_WARPS_PER_BLOCK;i++){
-        //         printf("warpGappedExtension: %d, warpTotals: %d\n", warpGappedExtension, warpTotals[i]);
-        //     }
-        // }
 
         gpuNumSeeds[blockIdx.x] = tmp;
     }
@@ -1991,15 +1371,6 @@ extern "C" {
             // Get the number of OIDs processed
             int OIDs_processed = oidEnd - oidStart + 1;
 
-            // CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
-
-            // // //If BufferID is 0, then synchronize the event
-            // if(BufferID == 0 && i != 0){
-            //     CHECK_CUDA_ERROR(cudaEventSynchronize(events[BufferID]));
-            // }
-            // As soon as the i is greater than the number of buffers, you are in a situation where you have to reuse buffers
-            // So make sure that the event on the buffer is synchronized before you use it.
-        
             // Synchronize the event
             if(i >= NUM_BUFFERS){
                 CHECK_CUDA_ERROR(cudaEventSynchronize(events[BufferID]));
@@ -2044,8 +1415,6 @@ extern "C" {
             CHECK_CUDA_ERROR(cudaMemcpyAsync(gpuSequenceLengthsPtr, sequenceLengthsPtr, (OIDs_processed + 1) * sizeof(uint32_t), cudaMemcpyHostToDevice, stream));
 
             // Get the query length
-
-            
             int sLen = 256;
 
             sLen = (seq_length <= 64)   ? 64   :
@@ -2061,7 +1430,6 @@ extern "C" {
                 (seq_length <= 2048) ? 2048 :
                                             2048;
             
-            //sLen = 1024;
 
             auto it = kernelMap.find({qSize, sLen});
             if (it != kernelMap.end()) {
@@ -2126,8 +1494,8 @@ extern "C" {
         // Calculate the duration
         std::chrono::duration<double> duration = end - start;
 
-        // Print the seqs processed and the execution time
-        fprintf(stdout, "Seqs Processed: %d, Execution Time: %f seconds\n", seqsProcessed, duration.count());
+        // // Print the seqs processed and the execution time
+        // fprintf(stdout, "Seqs Processed: %d, Execution Time: %f seconds\n", seqsProcessed, duration.count());
 
         return 0;
 
@@ -2206,18 +1574,15 @@ extern "C" {
         cudaStream_t* cudaStream = (cudaStream_t*)stream;  
 
         // Synchronize the stream
-        //CHECK_CUDA_ERROR(cudaStreamSynchronize(*cudaStream));
-        cudaStreamSynchronize(*cudaStream);
+        CHECK_CUDA_ERROR(cudaStreamSynchronize(*cudaStream));
 
-        // // CHECK FOR ERRORS
-        // cudaError_t error = cudaGetLastError();
+        // CHECK FOR ERRORS
+        cudaError_t error = cudaGetLastError();
 
-        // if (error != cudaSuccess) {
-        //     std::cerr << "CUDA error in streamSynchronize: " << cudaGetErrorString(error) << std::endl;
-        // }
+        if (error != cudaSuccess) {
+            std::cerr << "CUDA error in streamSynchronize: " << cudaGetErrorString(error) << std::endl;
+        }
     }
-
-
 
     void hostFree(void* pointer) {
         cudaFreeHost(pointer);

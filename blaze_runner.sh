@@ -51,6 +51,15 @@ else
     shopt -u nullglob
 fi
 
+# In case of first blaze run there is a setup time so we are going to generate and delete the output and rerun.
+# Only if blaze run the following.
+if [ "$1" == "--blaze" ]; then
+# Run a warm up run to generate the intermediate files.
+time (  $EXE $NUM_THREADS -query NP_345015.fa -db $DB_PATH 1> blaze_warm_op ) 2> blaze_warm_time
+# Remove the output and time file
+rm blaze_warm_op blaze_warm_time
+fi
+
 time (  $EXE $NUM_THREADS -query NP_670887.fa -db $DB_PATH 1>NP_670887_op$SUFF ) 2> 1_time$SUFF
 time (  $EXE $NUM_THREADS -query YP_244862.fa -db $DB_PATH 1>YP_244862_op$SUFF ) 2> 2_time$SUFF
 time (  $EXE $NUM_THREADS -query NP_308413.fa -db $DB_PATH 1>NP_308413_op$SUFF ) 2> 3_time$SUFF

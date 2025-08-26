@@ -1,11 +1,3 @@
-/*
-Base code setup done, have a bunch of debug code too!
-*/
-
-#include <thrust/copy.h>
-#include <thrust/count.h>
-#include <thrust/execution_policy.h>
-
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -16,15 +8,11 @@ Base code setup done, have a bunch of debug code too!
 #include <numeric>
 #include <bitset>
 #include <chrono>
-
-// Include the header to use sleep
 #include <unistd.h>
-
 #include <iostream>
 #include "util.hpp"
 
 #include <algo/blast/core/gpu_cpu_common.h>
-
 
 typedef struct {
     int best;
@@ -39,19 +27,12 @@ typedef struct {
 
 #define kRestrictedMult 0.68
 
-
-//#define DEBUG_PROBLEM 196686927
-
-#define DEBUG_PROBLEM 241450368
-#define S_OFF 397
-#define Q_OFF 190
-
 #define QUERY_BITSET_SIZE 256
 #define SUBJECT_LEN 256
-#define THREADS_PER_PROBLEM 64 // This is the number of threads that will be assigned to each problem
-#define MAX_SEEDS 8 // This is the max number of seeds that I can perform ungapped extension on. You need to get this number after removing the filterting from ungapped extension.
-#define MAX_SEEDS_GAPPED 8 // This is the max number of seeds that I can perform gapped extension on. You need to get this number after removing the filterting from gapped extension.
-#define WARPS_PER_BLOCK_FLOAT (static_cast<float>(THREADS_PER_PROBLEM) / static_cast<float>(WARP_SIZE)) //#define WARPS_PER_BLOCK_FLOAT 2.0
+#define THREADS_PER_PROBLEM 64 
+#define MAX_SEEDS 8 
+#define MAX_SEEDS_GAPPED 8 
+#define WARPS_PER_BLOCK_FLOAT (static_cast<float>(THREADS_PER_PROBLEM) / static_cast<float>(WARP_SIZE)) 
 #define WARPS_PER_BLOCK THREADS_PER_PROBLEM/WARP_SIZE
 #define BITSET_BYTES QUERY_BITSET_SIZE/BYTE_SIZE
 #define DIAGS QUERY_BITSET_SIZE+SUBJECT_LEN-1
@@ -84,7 +65,6 @@ using namespace std;
 
 __constant__ int score_matrix[28][28];
 __constant__ uint8_t query_bitmask[2744];
-// __constant__ uint16_t seed_holder[27648];
 
 __device__ inline unsigned generateMask(int laneID) {
     // If laneID is 31, return all 1s (32 bits)
@@ -427,9 +407,8 @@ void s_BlastAaExtendLeft( const char * s, const char * q, uint16_t s_off, uint16
     int left_d = 0;
     int left_score = 0;
 
-    uint loopcnt = ceil(((double)(n+1)/(double)WARP_SIZE)); // fixed a corner case bug here, as the loop for left extension starts at i=n and does down till i>=0, so the loopcount should be n+1 and not n.
+    uint loopcnt = ceil(((double)(n+1)/(double)WARP_SIZE)); 
 
-    // max score is definitely zero, however the best_i is initialized to n+1
     int globalMax = 0;
     int globalMaxD = n+1;
     int personalMax = 0;
@@ -445,10 +424,9 @@ void s_BlastAaExtendLeft( const char * s, const char * q, uint16_t s_off, uint16
             // Get a mask of all threads which are valid.
             unsigned valid_mask = __ballot_sync(0xFFFFFFFF, valid);
 
-            // Calcscore
             int localScore = valid ? score_matrix[q[j]][s[j]] : MININT;
 
-            for (int offset = 1; offset < warpSize; offset *= 2) { // This essentailly calculates the prefix sum by staggering the computation into log number of lops.
+            for (int offset = 1; offset < warpSize; offset *= 2) { 
                 int value = __shfl_up_sync(0xFFFFFFFF, localScore, offset);
                 if (laneID >= offset) {
                     localScore += value;
@@ -458,56 +436,48 @@ void s_BlastAaExtendLeft( const char * s, const char * q, uint16_t s_off, uint16
             localScore += prevScore;
             
             if(laneID == 0)
-            personalMax = max(personalMax, localScore);  // initial value for each thread
+            personalMax = max(personalMax, localScore); 
             else
-                personalMax =  localScore;// this is the max score that is broadcast to everyone in the warp.
-            
+                personalMax =  localScore;
+
             for (int offset = 1; offset < warpSize; offset *= 2) {
-                // Use personalMax here so that the running maximum is updated
                 int candidate = __shfl_up_sync(0xFFFFFFFF, personalMax, offset);
                 if (laneID >= offset) {
                     personalMax = max(personalMax, candidate);
                 }
             }
 
-            // The current score is the same as personalMax
             unsigned drop_mask = __ballot_sync(valid_mask, ((personalMax - localScore) >= dropoff) ); // This is the dropflag array from the "cuBLASTP Paper"
             unsigned non_zero_dm = __ffs(drop_mask) - 1;
 
             if(drop_mask != 0){
                 
-                int theAbsoluteMax = __shfl_sync(0xFFFFFFFF, personalMax, non_zero_dm); // this is the score that is broarcast to everyone in the warp.
-                
-                // Check if the absolute max is different than the global Max,
+                int theAbsoluteMax = __shfl_sync(0xFFFFFFFF, personalMax, non_zero_dm); 
+
                 if(theAbsoluteMax == globalMax){
-                    // The previous max score is still valid so get all threads to update their local variables and break out of the thread.
                     left_d = globalMaxD + 1;
                     left_score = globalMax;
-
                     break;
                 }else{
 
-                    unsigned tmask = generateMask(non_zero_dm); // This is the mask of all threads less than or equal to the calling thread.
-                    unsigned smask = __ballot_sync(0xFFFFFFFF, localScore == theAbsoluteMax); // Get the mask of threads, which have scores equal to the glibal max.
-                    smask = smask & tmask; // This is the mask of all threads less than or equal to the calling thread that have a score equal to the absolute max.
-                    uint8_t tempID = __ffs(smask) - 1; // Find the first non-zero bit in the mask // You get the ID of the first thread for which this is true.
-                    left_score = theAbsoluteMax; // This is the score that is broadcast to all threads in the warp.
+                    unsigned tmask = generateMask(non_zero_dm);
+                    unsigned smask = __ballot_sync(0xFFFFFFFF, localScore == theAbsoluteMax); 
+                    smask = smask & tmask; 
+                    uint8_t tempID = __ffs(smask) - 1; 
+                    left_score = theAbsoluteMax; 
                     left_d = l*WARP_SIZE + tempID + 1;
                     break;
                 }
         
             }else{
 
-                int thread31_max = __shfl_sync(0xFFFFFFFF, personalMax, 31); // this is the max score that is broadcast to all threads in the warp.
+                int thread31_max = __shfl_sync(0xFFFFFFFF, personalMax, 31); 
                 if(thread31_max != globalMax){
-                    // Do not update the global max score and the index.
                     unsigned smask = __ballot_sync(0xFFFFFFFF, localScore == thread31_max);
                     uint8_t maxID = __ffs(smask) - 1;
-                    // Update the global max score and the index.
                     globalMax = thread31_max;
-                    globalMaxD = l*WARP_SIZE + maxID; // This is the index of the first thread in the warp with the same score as thread 31.
-                    // If this is the last iteration then you just return the global max score and the index.
-                } //else when they are equal do not have to update the max value
+                    globalMaxD = l*WARP_SIZE + maxID; 
+                } 
 
                 if(l == loopcnt-1){
                     left_d = globalMaxD + 1;
@@ -524,7 +494,6 @@ void s_BlastAaExtendLeft( const char * s, const char * q, uint16_t s_off, uint16
 
     __syncwarp();
 
-    // Broadcast the left_d and the left_score from the first thread of each warp to all the threads of the warp
     *left_d_o = __shfl_sync(0xFFFFFFFF, left_d, 0);
     *left_score_o = __shfl_sync(0xFFFFFFFF, left_score, 0); 
 
@@ -544,9 +513,7 @@ void s_BlastAaExtendRight( const char * st, const char * qt, uint16_t s_off, uin
     int personalMax = score;
     int personalMaxD = -1;
 
-    uint loopcnt = ceil(((double)(n+1)/(double)WARP_SIZE)); // fixed a corner case bug here, as the loop for left extension starts at i=n and does down till i>=0, so the loopcount should be n+1 and not n.
-
-    // max score is definitely zero, however the best_i is initialized to n+1
+    uint loopcnt = ceil(((double)(n+1)/(double)WARP_SIZE)); 
     int globalMax = score;
     int globalMaxD = -1;
 
@@ -558,13 +525,11 @@ void s_BlastAaExtendRight( const char * st, const char * qt, uint16_t s_off, uin
         
             bool valid = j < n;
 
-            // Get a mask of all threads which are valid.
             unsigned valid_mask = __ballot_sync(0xFFFFFFFF, valid);
 
-            // Calcscore
             int localScore = valid ? score_matrix[qt[j]][st[j]] : MININT;
             
-            for (int offset = 1; offset < warpSize; offset *= 2) { // This essentailly calculates the prefix sum by staggering the computation into log number of lops.
+            for (int offset = 1; offset < warpSize; offset *= 2) { 
                 int value = __shfl_up_sync(0xFFFFFFFF, localScore, offset);
                 if (laneID >= offset) {
                     localScore += value;
@@ -574,66 +539,50 @@ void s_BlastAaExtendRight( const char * st, const char * qt, uint16_t s_off, uin
             localScore += prevScore;
             
             if(laneID == 0)
-            personalMax = max(personalMax, localScore);  // initial value for each thread
+            personalMax = max(personalMax, localScore);  
             else
-                personalMax =  localScore;// this is the max score that is broadcast to everyone in the warp.
+                personalMax =  localScore; 
             
             for (int offset = 1; offset < warpSize; offset *= 2) {
-                // Use personalMax here so that the running maximum is updated
                 int candidate = __shfl_up_sync(0xFFFFFFFF, personalMax, offset);
                 if (laneID >= offset) {
                     personalMax = max(personalMax, candidate);
                 }
             }
 
-            // The current score is the same as personalMax
-            unsigned drop_mask = __ballot_sync(valid_mask, ((localScore <= 0) || (personalMax - localScore) >= dropoff) ); // This is the dropflag array from the "cuBLASTP Paper"
+            unsigned drop_mask = __ballot_sync(valid_mask, ((localScore <= 0) || (personalMax - localScore) >= dropoff) ); 
             unsigned non_zero_dm = __ffs(drop_mask) - 1;
 
             if(drop_mask != 0){
                 
-                // Broadcast the currentLocalMax from the thread that called it quits to all threads in the warp.
-                int theAbsoluteMax = __shfl_sync(0xFFFFFFFF, personalMax, non_zero_dm); // this is the score that is broarcast to everyone in the warp.
+                int theAbsoluteMax = __shfl_sync(0xFFFFFFFF, personalMax, non_zero_dm); 
                 
-                // Check if the absolute max is different than the global Max,
                 if(theAbsoluteMax == globalMax){
-                    // The previous max score is still valid so get all threads to update their local variables and break out of the thread.
                     right_d = globalMaxD + 1;
                     right_score = globalMax;
-                    
                     break;
                 }else{
-                    // Get a mask of all threads lesser than or equal to the thread calling it quits that have a score equal to the absolute max.
-                    // Generate a mask of all threads less than or equal to the calling thread.
-                    unsigned tmask = generateMask(non_zero_dm); // This is the mask of all threads less than or equal to the calling thread.
-                    // Using this mask get the first thread that has a score equal to the absolute max.
-                    unsigned smask = __ballot_sync(0xFFFFFFFF, localScore == theAbsoluteMax); // Get the mask of threads, which have scores equal to the glibal max.
-                    // And and the two masks together
-                    smask = smask & tmask; // This is the mask of all threads less than or equal to the calling thread that have a score equal to the absolute max.
-                    // Get the first non-zero bit in the mask
-                    uint8_t tempID = __ffs(smask) - 1; // Find the first non-zero bit in the mask // You get the ID of the first thread for which this is true.
+                    unsigned tmask = generateMask(non_zero_dm); 
+                    unsigned smask = __ballot_sync(0xFFFFFFFF, localScore == theAbsoluteMax); 
+                    smask = smask & tmask; 
+                    uint8_t tempID = __ffs(smask) - 1; 
 
-                    right_score = theAbsoluteMax; // This is the score that is broadcast to all threads in the warp.
+                    right_score = theAbsoluteMax; 
                     right_d = l*WARP_SIZE + tempID + 1;
 
                     break;
                 }
         
             }else{
-                // Get the maxscore from thread 31
-                int thread31_max = __shfl_sync(0xFFFFFFFF, personalMax, 31); // this is the max score that is broadcast to all threads in the warp.
-    
-                // Check if the max score is equal to the global max score, if it is then you do not update the global max score and the index.
+
+                int thread31_max = __shfl_sync(0xFFFFFFFF, personalMax, 31); 
+
                 if(thread31_max != globalMax){
-                    // Do not update the global max score and the index.
                     unsigned smask = __ballot_sync(0xFFFFFFFF, localScore == thread31_max);
                     uint8_t maxID = __ffs(smask) - 1;
-                    // Update the global max score and the index.
                     globalMax = thread31_max;
-                    globalMaxD = l*WARP_SIZE + maxID; // This is the index of the first thread in the warp with the same score as thread 31.
-                    // If this is the last iteration then you just return the global max score and the index.
-                    
-                } //else when they are equal do not have to update the max value
+                    globalMaxD = l*WARP_SIZE + maxID;                     
+                } 
 
                 if(l == loopcnt-1){
                     right_d = globalMaxD + 1;
@@ -676,16 +625,14 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
     
     uint8_t seedCnt = 0; // Local seed count for each thread
 
-    //get the warp id
     int warpID = threadIdx.x / WARP_SIZE;
 
-    // Get the laneID
     uint8_t laneID = threadIdx.x & 0x1F; // Gets the lane ID.
 
     int tid = threadIdx.x; // Get the thread ID
 
     // Calculate the problem ID
-    size_t problemID = blockIdx.x; // Currently I launch all the problems in a single block, hence the problemID is the same as the blockID
+    size_t problemID = blockIdx.x; 
 
     // Create a 32-bit pointer to the constant memory so that I can do 32-bit operations to load the query bitmask
     uint32_t * gpuQuerydbArray32 = (uint32_t *)gpuQuerydbArray;
@@ -693,7 +640,6 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
     // Get the length of the db sequence
     uint32_t seqLen = gpuSequenceLength[problemID+1] - gpuSequenceLength[problemID];
     
-    // Return if either of the sequence is greater than 256
     if(seqLen > CPU_OFFLOAD_SIZE_GT_EQ){
         return;
     }
@@ -829,7 +775,6 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
         
     }
 
-    // Account for the seeds that are found in the last iteration
     // Using a ballot to get the mask of all threads in the warp that have a seed
     unsigned valid_seed_mask = __ballot_sync(0xFFFFFFFF, (seed != 0));
         
@@ -856,9 +801,8 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
         }
     }
 
-    __syncthreads(); // Makes sure that all the seeds and the warpTotals are written to shared memory
-    
-    // if the more seeds flag is set for any of the warps then use warp zero thread zero to set the gpuNumSeeds to 1
+    __syncthreads(); 
+
     #pragma unroll
     for(uint i=0;i<T_WARPS_PER_BLOCK;i++){
         if(moreSeedsFlag[i]){
@@ -871,17 +815,14 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
 
     int gappedExtension = 0;
 
-    // // Each warp handles warpTotals[warpID]/WARP_SIZE seeds for each warp, so loop over the T_WARPS_PER_BLOCK
     for(uint w=0; w < T_WARPS_PER_BLOCK; w++){
 
         uint8_t warpSeedCnt = warpTotals[w];
 
         uint warpResponsibility = ceil(warpSeedCnt/(float)T_WARPS_PER_BLOCK_FLOAT);
 
-        // Loop over the warpResponsibility for each warp
         for(uint wr = 0; wr < warpResponsibility; wr++){
 
-            //uint16_t addr = w*WARP_SIZE*MAX_SEEDS + wr*T_WARPS_PER_BLOCK + warpID;
             uint16_t addr = w*MAX_UG_SEEDS + wr*T_WARPS_PER_BLOCK + warpID;
 
 
@@ -901,7 +842,6 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
             #pragma unroll
             for(int j=0;j< wordsize; j++){
                 
-                // Calculate the score current all the threads of the warp are doing this, is this good?
                 score += score_matrix[gpuQuery[query_offset+j]][dbSeq[subject_offset+j]];
         
                 // update the score
@@ -927,7 +867,7 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
             }
 
             if(right_score <= left_score){
-                right_score = left_score; // Not sure if I wanna hardcode this here, maybe there is a better way to do this?
+                right_score = left_score;
                 right_d = 0;
             }
 
@@ -971,7 +911,6 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
 
                     hsp_end = q_start + min(q_length, s_length);
 
-                    // This is totally redundant work that is being done by each thread. You can use some of the techniques that cuBLASTP proposed to parallelize this across threads of the warp.
                     for(int j=0;j<((hsp_end-(q_start+HSP_MAX_WINDOW)));j++){
                         score -= score_matrix[q[q_start+j]][s[s_start+j]];
                         score += score_matrix[q[q_start+HSP_MAX_WINDOW+j]][s[s_start+HSP_MAX_WINDOW+j]];
@@ -993,7 +932,6 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
                 gappedSeed = (q_length << 16) | s_length;
             }
 
-            // Write whatever is the gappedseed value is back to the finalSeeds array using lane 0
             if(laneID == 0){
                 finalSeeds[addr] = gappedSeed;
             }
@@ -1009,8 +947,6 @@ __global__ void gpuBLAZE_full(uint8_t * gpuDbArray, uint32_t * gpuSequenceLength
 
         int seedCount = 0;
 
-        // For all the warps in the block iterate over the final seeds array and if
-        // the element is not zero then write it to the gappedSeeds array
         for(int i=0;i<T_WARPS_PER_BLOCK;i++){
             // Get the warp seed count
             int warpSeedCount = warpTotals[i];
@@ -1061,12 +997,11 @@ __global__ void gpuBLAZE_everything(uint8_t * gpuDbArray, uint32_t * gpuSequence
     uint8_t laneID = threadIdx.x & 0x1F; // Gets the lane ID.
 
     // Calculate the problem ID
-    size_t problemID = blockIdx.x; // Currently I launch all the problems in a single block, hence the problemID is the same as the blockID
+    size_t problemID = blockIdx.x;
 
     // Get the length of the db sequence
     uint32_t seqLen = gpuSequenceLength[problemID+1] - gpuSequenceLength[problemID];
 
-    // Return if either of the sequence is greater than 256
     if(seqLen > CPU_OFFLOAD_SIZE_GT_EQ){
         return;
     }
@@ -1118,7 +1053,6 @@ __global__ void gpuBLAZE_everything(uint8_t * gpuDbArray, uint32_t * gpuSequence
 
         int q_length = seed >> 16;
         int s_length = seed & 0xFFFF;
-        //int hsp_len = gpuHSPLen[blockIdx.x*MAX_SEEDS_GAPPED + seedIndex];
         int ungapped_score = 0;
 
         int gapped_right = 0;
@@ -1133,13 +1067,10 @@ __global__ void gpuBLAZE_everything(uint8_t * gpuDbArray, uint32_t * gpuSequence
 
         if(totalScore >= gapped_cutoff){
             gappedExtension = 1;
-            // using lane0  update the warpTotals to 1 if the gappedExtension is found
             if(laneID == 0){
                 warpTotals[warpID] = 1;
             }
             break;
-
-            //break;
         }
 
         __syncwarp();       
@@ -1151,7 +1082,6 @@ __global__ void gpuBLAZE_everything(uint8_t * gpuDbArray, uint32_t * gpuSequence
 
     int warpGappedExtension = __ballot_sync(0xFFFFFFFF, gappedExtension);
     
-    // If the warp has a gapped extension then set then get lane 0 to set warpTotals[warpID] to 1 alse set it to 0
     if(laneID == 0){
         if(warpGappedExtension != 0)
             warpTotals[warpID] = 1;
@@ -1162,10 +1092,8 @@ __global__ void gpuBLAZE_everything(uint8_t * gpuDbArray, uint32_t * gpuSequence
     // Synchronize the threads in the block
     __syncthreads();
 
-    // use warpID 0 to check if either of the warps have a gapped extension if so then set gpuNumSeeds[blockIdx.x] = 1; else set it to 0
     if(warpID == 0 and laneID == 0){
 
-        // loop over the warps and check if any of the warps have a gapped extension
         int tmp = 0;
         for(int i=0;i<T_WARPS_PER_BLOCK;i++){
             if(warpTotals[i] != 0){
@@ -1190,8 +1118,7 @@ void check(cudaError_t err, const char* const func, const char* const file,
         std::cerr << "CUDA Runtime Error at: " << file << ":" << line
                   << std::endl;
         std::cerr << cudaGetErrorString(err) << " " << func << std::endl;
-        // We don't exit when we encounter CUDA errors in this example.
-        // std::exit(EXIT_FAILURE);
+        std::exit(EXIT_FAILURE);
     }
 }
 
@@ -1205,8 +1132,7 @@ void checkLast(const char* const file, const int line)
         std::cerr << "CUDA Runtime Error at: " << file << ":" << line
                   << std::endl;
         std::cerr << cudaGetErrorString(err) << std::endl;
-        // We don't exit when we encounter CUDA errors in this example.
-        // std::exit(EXIT_FAILURE);
+        std::exit(EXIT_FAILURE);
     }
 }
 
@@ -1308,7 +1234,6 @@ extern "C" {
         uint32_t * gpuHSPLenPtr;
 
 
-        // MaxBytes is actually constant so replacing, but clean up TODO: [SCG]
         maxBytes = dbOffset[1] - dbOffset[0]; 
 
         // CudaAllocHost the bitmask array wuing the max_num_oids for the total number of chunks
@@ -1322,7 +1247,6 @@ extern "C" {
         for(uint b = 0; b < NUM_BUFFERS; b++){
             CHECK_CUDA_ERROR(cudaHostAlloc(&sequenceLengths[b], (max_num_oids + 1) * sizeof(uint32_t),  cudaHostAllocDefault));
             CHECK_CUDA_ERROR(cudaMalloc(&gpuSequenceLengths[b], (max_num_oids + 1) * sizeof(uint32_t)));
-            //CHECK_CUDA_ERROR(cudaHostAlloc(&bitmaskArray[b], (max_num_oids) * sizeof(uint8_t),  cudaHostAllocDefault));
             CHECK_CUDA_ERROR(cudaMalloc(&gpuBitmaskArray[b], (max_num_oids) * sizeof(uint8_t)));
             CHECK_CUDA_ERROR(cudaHostAlloc(&threadSequenceData[b], maxBytes * sizeof(uint8_t),  cudaHostAllocDefault));
             CHECK_CUDA_ERROR(cudaMalloc(&threadSequenceDataGPU[b], maxBytes * sizeof(uint8_t)));        
@@ -1355,9 +1279,7 @@ extern "C" {
 
             unsigned BufferID = i % NUM_BUFFERS;
 
-            // Overwite the address of the bitmask array with the pointer of the surviving sequences
-            //bitmaskArrayPtr = reinterpret_cast<uint8_t*>(&survivingSequences[oidStart]);
-            bitmaskArrayPtr = bitmaskArray[i]; // I am going to use the bitmask array for the current chunk
+            bitmaskArrayPtr = bitmaskArray[i]; 
             threadSequenceDataPtr = threadSequenceData[BufferID];
             gpuSequenceLengthsPtr = gpuSequenceLengths[BufferID];
             gpuBitmaskArrayPtr = gpuBitmaskArray[BufferID];
@@ -1368,7 +1290,6 @@ extern "C" {
 
             size_t seq_length = 0;
 
-            // Get the number of OIDs processed
             int OIDs_processed = oidEnd - oidStart + 1;
 
             // Synchronize the event
@@ -1382,11 +1303,6 @@ extern "C" {
 
                 // Update the seq_arg.oid
                 seq_arg.oid = oid_search;
-
-                // if chunk == 0 and thread_id == 0 and oid_search == 0
-                if(i == 0 && thread_id == 0 && oid_search == oidStart){
-                    seq_arg.oid = DEBUG_PROBLEM;
-                }
 
                 // Get the sequence
                 BlastSeqSrcGetSequence(seq_src, &seq_arg);
@@ -1472,8 +1388,7 @@ extern "C" {
             uint64_t oidStart = chunkStart[i*totalThreads+thread_id];
             uint64_t oidEnd = chunkEnd[i*totalThreads+thread_id];
 
-            //bitmaskArrayPtr = reinterpret_cast<uint8_t*>(&survivingSequences[oidStart]);
-            bitmaskArrayPtr = bitmaskArray[i]; // I am going to use the bitmask array for the current chunk
+            bitmaskArrayPtr = bitmaskArray[i]; 
 
             for(int k=0; k < oidEnd - oidStart + 1; k++){
                 // Read each byte of the bitmaskArray
@@ -1641,7 +1556,7 @@ extern "C" {
 
     void copyConstantMemoryLUT(uint16_t * seedLUT, size_t seedLUTSize){
         // Copy the bitmaskarraay to the constant memory
-        // cudaMemcpyToSymbol( seed_holder, seedLUT , seedLUTSize*sizeof(uint16_t), 0, cudaMemcpyHostToDevice );
+        cudaMemcpyToSymbol( seed_holder, seedLUT , seedLUTSize*sizeof(uint16_t), 0, cudaMemcpyHostToDevice );
 
         // Check for errors
         cudaError_t error = cudaGetLastError();

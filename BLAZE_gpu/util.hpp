@@ -1,3 +1,18 @@
+// Copyright (C) 2025  Sree Charan Gundabolu, Mithuna Thottethodi and T. N. Vijaykumar
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #ifndef UTIL_HPP // Header guard
 #define UTIL_HPP
 
@@ -110,13 +125,6 @@ std::vector<cellType> lut_generator(){
   X(32) X(64) X(96) X(128) X(160) X(192) X(224) X(256) \
   X(288) X(320) X(352) X(384) X(416) X(448) X(480) X(512) \
   X(544) X(576) X(608) X(640) 
-
-// #define TQ_VALUES  \
-//   X(640)
-
-// #define SUBJECT_LEN_BINS \
-//   Y(64) Y(128) Y(192) Y(256) Y(320) \
-//   Y(384) Y(448) Y(512) Y(576) Y(1024) Y(2048)
 
 #define SUBJECT_LEN_BINS \
   Y(64) Y(128) Y(192) Y(256) Y(320) \

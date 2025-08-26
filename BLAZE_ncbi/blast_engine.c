@@ -73,7 +73,6 @@
 #include <algo/blast/core/mb_indexed_lookup.h>
 #include <algo/blast/core/gencode_singleton.h>
 
-// SCG
 #include <algo/blast/core/blast_seqsrc_impl.h>
 #include <algo/blast/core/blast_seqsrc.h>
 #include <algo/blast/core/gpu_cpu_common.h>
@@ -735,25 +734,10 @@ s_BlastSearchEngineOneContextMT(
                                    kScanSubjectOffsetArraySize,
                                    init_hitlist, ungapped_stats);
 
-            // fprintf(stderr, "Thread %d: WordFinder done\n", thread_id);
-            //
-
-            // For OID == 74 print the OID and total number of hits
-            // if (subject->oid == 9629202)
-            // {
-            //     // Print the oid and the total number of hits
-            //     fprintf(stderr, "Thread %d: oid = %d, total = %d\n", thread_id, subject->oid, init_hitlist->total);
-            // }
-
-
             if (init_hitlist->total == 0)
             {
                 continue;
             }
-            // else {
-            //     // Print the oid and the total number of hits
-            //     fprintf(stderr, "Thread %d: oid = %d, total = %d\n", thread_id, subject->oid, init_hitlist->total);
-            // }
         }
 
         if (score_options->gapped_calculation)
@@ -829,10 +813,6 @@ s_BlastSearchEngineOneContextMT(
         {
             continue;
         }
-        // else {
-        //     // Print the oid and the total number of hits
-        //     fprintf(stderr, "Thread %d: oid = %d, hspcnt = %d\n", thread_id, subject->oid, hsp_list->hspcnt);
-        // }
 
         /* The subject ordinal id is not yet filled in this HSP list */
         hsp_list->oid = subject->oid;
@@ -2684,13 +2664,6 @@ Int4 BLAST_PreliminarySearchEngineMT(
             totalSeqs++;
 
             seq_arg.oid = oid_index; 
-            
-            // if(thread_id == 0 && i == 0 && oid_index == oidStart)
-            // {
-            //     seq_arg.oid =  241450368;
-            // }
-
-            //seq_arg.oid = intege  [i];
 
             Int4 stat_length;
             if (seq_arg.oid == BLAST_SEQSRC_ERROR)
@@ -2771,10 +2744,6 @@ Int4 BLAST_PreliminarySearchEngineMT(
             {
                 break;
             }
-
-            // If OID index == 74 then print the hspcnt
-            // if (seq_arg.oid == 74)
-            //    fprintf(stderr, "ThreadID %d FOUND HSPs: %d !\n",thread_id, hsp_list->hspcnt);
 
             if (hsp_list && hsp_list->hspcnt > 0)
             {
@@ -2945,22 +2914,6 @@ Int2 Blast_RunPreliminarySearch(EBlastProgramType program,
                                                    psi_options, db_options, hsp_stream, diagnostics, NULL, NULL);
 }
 
-Int2 fHello_One(unsigned threadIndex){
-
-    // Print the threadIndex
-    fprintf(stderr, "Thread %d starting Hello One! Wohoo!\n", threadIndex);
-
-    return 0;
-}
-
-Int2 fHello_Two(unsigned threadIndex){
-    
-    // Print the threadIndex
-    fprintf(stderr, "Thread %d starting Hello Two! Wohoo!\n", threadIndex);
-
-    return 0;
-}
-
 Int2 Blast_RunPreliminarySearchWithInterruptMT(
     unsigned threadCount,
     int threadIndex,
@@ -2995,9 +2948,6 @@ Int2 Blast_RunPreliminarySearchWithInterruptMT(
       it to the engine and have a lot of mutex contention. */
     BlastDiagnostics *local_diagnostics = Blast_DiagnosticsInit();
 
-    // debug print to stderr that the thread is starting
-    // fprintf(stderr, "Thread %d starting from the C part of the code! Wohoo!\n", threadIndex);
-
     if ((status =
              BLAST_GapAlignSetUp(program, seq_src, score_options,
                                  eff_len_options, ext_options, hit_options,
@@ -3018,7 +2968,6 @@ Int2 Blast_RunPreliminarySearchWithInterruptMT(
 
         uint32_t num_survivors = 0;
 
-            // Okay the aim is to get the ungapped score cutoff and the gapped score cutoff here
         int gapped_cutoff = hit_params->cutoffs->cutoff_score;
 
         BlastInitialWordParameters *word_params = NULL;
@@ -3035,7 +2984,6 @@ Int2 Blast_RunPreliminarySearchWithInterruptMT(
 
         BlastSeqSrcSetSurvivors(seq_src, survivingSequences, num_survivors);        
 
-        // fprintf(stderr, "Thread %d starting from the C part of the code! Wohoo!\n", threadIndex);
         if ((status =
                  BLAST_PreliminarySearchEngineGPU(threadCount,
                                                  threadIndex,

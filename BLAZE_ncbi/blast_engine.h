@@ -227,7 +227,6 @@ Blast_RunPreliminarySearchWithInterruptGPU(
    TInterruptFnPtr interrupt_search, SBlastProgress* progress_info);
 
 
-// I wrote this function to pass the threadIndex.
 Int2 
 Blast_RunPreliminarySearchWithInterruptMT(
    unsigned threadCount,
@@ -243,11 +242,6 @@ Blast_RunPreliminarySearchWithInterruptMT(
    const PSIBlastOptions* psi_options, const BlastDatabaseOptions* db_options, 
    BlastHSPStream* hsp_stream, BlastDiagnostics* diagnostics,
    TInterruptFnPtr interrupt_search, SBlastProgress* progress_info);
-
-
-Int2 fHello_One(unsigned threadIndex);
-
-Int2 fHello_Two(unsigned threadIndex);
 
 /** Gapped extension function pointer type */
 typedef Int2 (*BlastGetGappedScoreType) 

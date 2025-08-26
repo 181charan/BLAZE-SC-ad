@@ -471,10 +471,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
     // Pass the pointer to the BlastSeqSrc
     BlastSeqSrcSetSequenceBitmaskPointer(m_InternalData->m_SeqSrc->GetPointer(), (char*)survivingBitmask);
 
-    // // Print the pointers for debugging
-    // cout << "GPU Query DB Pointer: " << (void*)gpuQuerydbArray << endl;
-    // cout << "GPU Query Bitmask Pointer: " << (void*)gpuQuerybitmaskArray << endl;
-
     //////////////////////////////////END QUERY DATA READ///////////////////////////
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -502,9 +498,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
         BlastSeqSrcGetSeqArg seq_arg;
         memset((void*) &seq_arg, 0, sizeof(seq_arg));
         seq_arg.encoding = eBlastEncodingProtein;
-
-        // // Create a new file to hold the database
-        //std::ofstream db_file(std::to_string(totalDBBytes)+"_db.bin", std::ios::binary);
         
         // This file is not valid so let us create a new one.
         uint64_t prefix_sum = 0;
@@ -514,10 +507,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
             seq_arg.oid = i;
             if (BlastSeqSrcGetSequence(m_InternalData->m_SeqSrc->GetPointer(), &seq_arg) < 0) continue;
 
-            // // Write the sequence to the db file
-            //db_file.write((char*)seq_arg.seq->sequence, seq_arg.seq->length);
-
-            //indexArray_DYN[i] = prefix_sum;
             // Write the prefix_sum to the index file as a uint64_t
             index_file.write((char*)&prefix_sum, sizeof(uint64_t));
             prefix_sum += seq_arg.seq->length;
@@ -547,12 +536,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
     std::vector<uint16_t> flattenedNeighbours;
     uint16_t* lookupHelper = new uint16_t[TABLESIZE];
 
-    // // Create 16 git versions of the lookup table.
-    // uint16_t* lookupTable16 = new uint16_t[TABLESIZE];
-
-
-    // std::cout << "LUT" << std::endl;
-
     // For each index print the number of entries for each index
     // Loop through the kmerNeighbours and create the flattenedNeighbours array
     for (uint indx = 0; indx < kmerNeighbours.size(); ++indx) {
@@ -562,17 +545,9 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
         flattenedNeighbours.insert(flattenedNeighbours.end(), kmerNeighbours[indx].begin(), kmerNeighbours[indx].end());
     }
 
-    // std::cout << "END:LUT" << std::endl;
-
-
     // Convert the flattenedNeighbours vector to an array
     uint16_t* flattenedNeighboursArray = new uint16_t[flattenedNeighbours.size()];
     std::copy(flattenedNeighbours.begin(), flattenedNeighbours.end(), flattenedNeighboursArray);
-
-    // Okay I created a lookup table to get the flattened array, the lookup table and the prefix Sum.
-    // So here is the plan, I am going to allocate memory on the GPU for these tables and copy these over to the GPU
-    // Then I will just take the total number of sequences and split the work among the threads just by dividing the total number of sequences by the number of threads
-    // The CPU thread does not do anything, I will make sure to launch only one thread for the CPU which just returns
 
     // Create a GPU pointer to the lookupTable
     uint16_t* gpuLookupTable;
@@ -594,80 +569,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
 
     // Set the lookupTable, lookupHelper and flattenedNeighboursArray to the BlastSeqSrc
     BlastSeqSrcSetIsolationPointers(m_InternalData->m_SeqSrc->GetPointer(), gpuLookupTable, gpuLookupHelper, gpuFlattenedNeighboursArray);
-
-
-    // I am going to attempt to copy the flattenedNeighboursArray into constant memory
-    //copyConstantMemoryLUT(flattenedNeighboursArray, flattenedNeighbours.size());
-    // copyConstantMemoryLUT(lookupHelper, TABLESIZE);
-
-
-
-    // Just print the number of bytes the gpuFlattenedNeighboursArray is to stderr
-    //std::cerr << "gpuFlattenedNeighboursArray: " << flattenedNeighbours.size() * sizeof(uint16_t) << std::endl;
-    //exit(0);
-
-    // Let me see how big this one is,
-
-    //28*28*28*4 =
-    //28*28*28*4 =
-    //exit(0);
-
-    //
-
-
-
-
-    // // Check if the index file exists
-    // std::string fullDBFilename = "/media/ubuntu/nvme_db_disk/"+std::to_string(totalDBBytes)+"_db.bin";
-
-    // // Open the file using C style file I/O
-    // FILE *dbFile = fopen(fullDBFilename.c_str(), "rb");
-
-    // // Check if the file is valid
-    // if(!dbFile)
-    // {
-    //     cerr << "Error: Unable to open the database file" << endl;
-    //     exit(1);
-    // }
-
-    // // Pass the file pointer to the BlastSeqSrc
-    // BlastSeqSrcSetFullDBPointer(m_InternalData->m_SeqSrc->GetPointer(), dbFile);
-    
-    // Check how much time it takes to do the following
-    // struct timespec start, end;
-
-    // Calculate the time taken to read the index file
-    // clock_gettime(CLOCK_MONOTONIC, &start);
-
-    // // Read in an index file
-    // std::ifstream indexFile(indexFileName, std::ios::binary);
-
-    // // Check if the file is valid
-    // if(!indexFile.is_open())
-    // {
-    //     cerr << "Error: Unable to open the index file" << endl;
-    //     exit(1);
-    // }
-    
-    // // Get the size of the index file
-    // indexFile.seekg(0, indexFile.end);
-    // size_t indexSize = indexFile.tellg();
-    // indexFile.seekg(0, indexFile.beg);
-
-    // // Print the indexSize
-    // //cout << "IndexSize: " << indexSize << endl;
-
-    // // Create an array to store the index
-    // uint8_t* indexArray = new uint8_t[indexSize];
-    // // Read the index file into the array
-    // indexFile.read((char*)indexArray, indexSize);
-    // // Close the file
-    // indexFile.close() ;
-
-    // // Create a uint64_t pointer to access the indexArray
-    // uint64_t* indexArray64 = (uint64_t*)indexArray;
-    // uint64_t indexArraySize64 = indexSize / sizeof(uint64_t);
-    // uint64_t * indexArrayPointer = &indexArray64[1];
 
     int fd = open(indexFileName.c_str(), O_RDWR); // Open for read/write
 
@@ -910,7 +811,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
     // Print the total number of chunks
     // cout << "TotalChunks: " << numChunks << endl;
 
-    //exit(1);
 
     // Now that we have the total number of chunks, we allocate the final perThreadChunk Arrays
     uint64_t* allChunkStart = new uint64_t[numChunks*totalThreads];
@@ -923,7 +823,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
     uint64_t accumBytes = 0;
 
     // Print the ranges of the bins from the end
-    //for(int i = binArraySize32/2 - 1; i >= 0; i--)
     for(int i = 0; i <= binArraySize32/2 - 1; i++)
     {
 
@@ -1329,8 +1228,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
     // Once read I can pass the indexArray64, indexArraySize64, chunkArray, numChunks to the GPU
     BlastSeqSrcPassDBWorkInfo(m_InternalData->m_SeqSrc->GetPointer(), &indexArray64[0], indexArraySize64, numChunks, allChunkStart, allChunkEnd, dbOffsets);
 
-
-
     /////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////
 
@@ -1342,23 +1239,8 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
 
     time_taken = (time_taken + (end.tv_nsec - start.tv_nsec)) * 1e-9;
 
-    // Print the time taken
-    cout << "Time taken for this setup: " << time_taken << " seconds" << endl;
-
-    // 
-    //exit(1);
-
-    // I am going to assume that I am going to launch 10 threads, in this case I am going to use 8 threads for the BLAST search and 2 for GPU.
-
-    // BlastSeqSrc ** seqsrcArray = new BlastSeqSrc*[4];
-
-    // unique_ptr<const CBlastOptionsMemento> opts_memento(m_Options->CreateSnapshot());
-    // CPrelimSearchRunner(*m_InternalData, opts_memento.get())();
-    
-    // for(int i = 0; i < 4; i++){
-    //     seqsrcArray[i] = BlastSeqSrcCopy(m_InternalData->m_SeqSrc->GetPointer()); 
-    //     m_InternalData->m_SeqSrc.Reset(new TBlastSeqSrc(seqsrcArray[i], BlastSeqSrcFree));
-    // }
+    // // Print the time taken
+    // cout << "Time taken for this setup: " << time_taken << " seconds" << endl;
 
     // Create the threads ...
     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
@@ -1418,15 +1300,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
 
     // ... and wait for the threads to finish
     Uint8 retv(0);
-    // NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-    //     void * result(0);
-    //     (*thread)->Join(&result);
-    //     if (result) {
-    //     	// Thread is not really returning a pointer, it's actually
-    //     	//  retruning an int
-    //         retv = reinterpret_cast<Uint8> (result);
-    //     }
-    // }
     for (size_t i = 0; i < the_threads.size(); i++) {
         void* result(0);
 
@@ -1438,17 +1311,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
         }
     }
 
-
-
-    // clock_gettime(CLOCK_MONOTONIC, &end);
-
-    // // Calculate the time taken
-    // double time_taken = (end.tv_sec - start.tv_sec) * 1e9;
-
-    // time_taken = (time_taken + (end.tv_nsec - start.tv_nsec)) * 1e-9;
-
-    // Print the time taken
-    //cout << "Time to launch and finish threads: " << time_taken << " seconds" << endl;
 
     // Print the thread status to stderr
     for(int i = 0; i < totalThreads; i++)
@@ -1462,13 +1324,6 @@ CBlastPrelimSearch::x_LaunchMultiThreadedSearch(SInternalData& internal_data)
     delete [] allChunkEnd;
     delete [] dbOffsets;
     delete [] survivingBitmask;
-
-
-    // // Close the db file
-    // fclose(dbFile);
-
-    // Free the host memory
-    //hostFree(hostDBArray);
 
     BlastSeqSrcSetNumberOfThreads(m_InternalData->m_SeqSrc->GetPointer(), 0);
 

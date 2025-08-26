@@ -90,6 +90,269 @@ __device__ inline unsigned generateMask(int laneID) {
     return (1U << (laneID + 1)) - 1U;
 }
 
+
+__inline__ __device__
+unsigned semiGappedKernelLeftSmall(const char *A, const char *B, int M, int N, BlastGapDP * score_array, bool reverse_sequence){
+
+    int sizeA = M;
+    int sizeB = N;
+
+    // Get the thread id
+    int tid = threadIdx.x;
+
+    // laneID within the warp
+    int laneID = tid % WARP_SIZE;
+
+    int warpID = tid / WARP_SIZE;
+
+    char * A_block = (char *)A;
+    char * B_block = (char *)B;
+    char * tempBlockPtr;
+
+    // min of A and B
+    int minAB = min(sizeA, sizeB);
+    int maxAB = max(sizeA, sizeB);
+
+    if(minAB == sizeA){
+        tempBlockPtr = A_block;
+        A_block = B_block;
+        B_block = tempBlockPtr;
+        // swap the sizes
+        int tempSize = sizeA;
+        sizeA = sizeB;
+        sizeB = tempSize;
+    }
+
+    int sweepcnt = ceil(((double)maxAB/(double)WARP_SIZE));
+
+    int temp1 = 0;
+    int temp2 = 0;
+
+    int globalMax = 0;          // globalMax is the maximum score encountered in the DP calculation.
+
+    int score;
+    int score_gap_row;
+    int score_gap_col;
+    int next_score;
+    int best_score = MININT;
+
+    score = -GAP_OPEN_EXTEND;
+    score_array[0].best = 0;
+    score_array[0].best_gap = -GAP_OPEN_EXTEND;
+
+    for (int i = 1; i <= minAB; i++) {
+        score_array[i].best = score;
+        score_array[i].best_gap = score - GAP_OPEN_EXTEND;
+        score -= GAP_EXTEND;
+    }
+
+    __syncwarp();
+
+    int b_gap = 0;
+
+    int best_prev = 0;
+    int bestgap_prev = 0;
+
+    for(int e=0;e<sweepcnt;e++){
+
+        // Reset the score and the score_gap_row
+        score = MININT;
+        score_gap_row = MININT;
+
+        for(int x=(e*WARP_SIZE); x < (e*WARP_SIZE + WARP_SIZE + minAB); x++){
+        
+            int i = e*WARP_SIZE + laneID;
+            int j = x - i;
+
+            temp1 = __shfl_up_sync(0xffffffff, best_prev, 1, 32);
+            temp2 = __shfl_up_sync(0xffffffff, bestgap_prev, 1, 32);
+
+            if(!(i < 0 || ( (i + 2) > maxAB) || j < 0 || (j + 1) > minAB)){
+
+                int i_temp = i + 1;
+                int b_index = j;
+
+                if(laneID == 0){
+                    next_score = score_array[b_index].best;
+                    score_gap_col = score_array[b_index].best_gap;
+                }
+                else{
+                    next_score = temp1;
+                    score_gap_col = temp2;
+                }
+
+                next_score += score_matrix[A_block[maxAB - i_temp]][B_block[ minAB - (b_index+1)]];
+                
+                if (score < score_gap_col)
+                    score = score_gap_col;
+                if (score < score_gap_row)
+                    score = score_gap_row;
+
+                if (score > best_score) {
+                    best_score = score;
+                }
+
+                score_gap_row -= GAP_EXTEND;
+                score_gap_col -= GAP_EXTEND;
+                bestgap_prev = max(score - GAP_OPEN_EXTEND, score_gap_col);
+                score_gap_row = max(score - GAP_OPEN_EXTEND,
+                                    score_gap_row);
+                best_prev = score;
+
+                score = next_score;
+
+                if(laneID == 31){
+                    score_array[b_index].best = best_prev;
+                    score_array[b_index].best_gap = bestgap_prev;
+                }
+
+            }
+
+
+        }
+
+        
+    }
+
+    // holds the global maximum across all threads
+    globalMax = __reduce_max_sync( 0xFFFFFFFF, best_score);
+
+    return globalMax;
+    
+}
+
+__inline__ __device__
+unsigned semiGappedKernelRightSmall(const char *A, const char *B, int M, int N, BlastGapDP * score_array, bool reverse_sequence){
+
+    int sizeA = M;
+    int sizeB = N;
+
+    // Get the thread id
+    int tid = threadIdx.x;
+
+    // laneID within the warp
+    int laneID = tid % WARP_SIZE;
+
+    int warpID = tid / WARP_SIZE;
+
+    char * A_block = (char *)A;
+    char * B_block = (char *)B;
+    char * tempBlockPtr;
+
+    // min of A and B
+    int minAB = min(sizeA, sizeB);
+    int maxAB = max(sizeA, sizeB);
+
+    if(minAB == sizeA){
+        tempBlockPtr = A_block;
+        A_block = B_block;
+        B_block = tempBlockPtr;
+        // swap the sizes
+        int tempSize = sizeA;
+        sizeA = sizeB;
+        sizeB = tempSize;
+    }
+
+    int sweepcnt = ceil(((double)maxAB/(double)WARP_SIZE));
+
+    // Print the sweep count
+    int temp1 = 0;
+    int temp2 = 0;
+
+    int globalMax = 0;          // globalMax is the maximum score encountered in the DP calculation.
+
+    int score;
+    int score_gap_row;
+    int score_gap_col;
+    int next_score;
+    int best_score = MININT;
+
+    score = -GAP_OPEN_EXTEND;
+    score_array[0].best = 0;
+    score_array[0].best_gap = -GAP_OPEN_EXTEND;
+
+    //TODO: Can definitely parallelize this one!
+    for (int i = 1; i <= minAB; i++) {
+        score_array[i].best = score;
+        score_array[i].best_gap = score - GAP_OPEN_EXTEND;
+        score -= GAP_EXTEND;
+    }
+
+    __syncwarp();
+
+    int b_gap = 0;
+
+    int best_prev = 0;
+    int bestgap_prev = 0;
+
+    for(int e=0;e<sweepcnt;e++){
+
+        // Reset the score and the score_gap_row
+        score = MININT;
+        score_gap_row = MININT;
+
+        for(int x=(e*WARP_SIZE); x < (e*WARP_SIZE + WARP_SIZE + minAB); x++){
+        
+            int i = e*WARP_SIZE + laneID;
+            int j = x - i;
+
+            temp1 = __shfl_up_sync(0xffffffff, best_prev, 1, 32);
+            temp2 = __shfl_up_sync(0xffffffff, bestgap_prev, 1, 32);
+
+            if(!(i < 0 || ( (i + 2) > maxAB) || j < 0 || (j + 1) > minAB)){
+
+                int i_temp = i + 1;
+                int b_index = j;
+
+                if(laneID == 0){
+                    next_score = score_array[b_index].best;
+                    score_gap_col = score_array[b_index].best_gap;
+                }
+                else{
+                    next_score = temp1;
+                    score_gap_col = temp2;
+                }
+
+                next_score += score_matrix[A_block[i_temp]][B_block[b_index+1]];
+                                
+                if (score < score_gap_col)
+                    score = score_gap_col;
+                if (score < score_gap_row)
+                    score = score_gap_row;
+
+                if (score > best_score) {
+                    best_score = score;
+                }
+
+                score_gap_row -= GAP_EXTEND;
+                score_gap_col -= GAP_EXTEND;
+                bestgap_prev = max(score - GAP_OPEN_EXTEND, score_gap_col);
+                score_gap_row = max(score - GAP_OPEN_EXTEND,
+                                    score_gap_row);
+                best_prev = score;
+
+                score = next_score;
+
+                if(laneID == 31){
+                    score_array[b_index].best = best_prev;
+                    score_array[b_index].best_gap = bestgap_prev;
+                }
+
+            }
+
+
+        }
+
+        
+    }
+
+    // holds the global maximum across all threads
+    globalMax = __reduce_max_sync( 0xFFFFFFFF, best_score);
+
+    return globalMax;
+    
+}
+
 __inline__ __device__
 unsigned semiGappedKernelLeft(const char *A, const char *B, int M, int N, BlastGapDP * score_array, bool reverse_sequence){
 
@@ -1073,9 +1336,18 @@ __global__ void gpuBLAZE_everything(uint8_t * gpuDbArray, uint32_t * gpuSequence
         int gapped_right = 0;
         int gapped_left = 0;
 
+        #if T_BUFFER_SIZE < 128
+        gapped_left = semiGappedKernelLeftSmall(q, s, q_length, s_length, &score_array[warpID][0], 1);
+        #else
         gapped_left = semiGappedKernelLeft(q, s, q_length, s_length, &score_array[warpID][0], 1);
+        #endif
+
         if (q_length < gpuQueryLength && s_length < seqLen) {
+            #if T_BUFFER_SIZE < 128
+            gapped_right = semiGappedKernelRightSmall(q+q_length-1, s+s_length-1, gpuQueryLength-q_length, seqLen-s_length, &score_array[warpID][0], 0);
+            #else
             gapped_right = semiGappedKernelRight(q+q_length-1, s+s_length-1, gpuQueryLength-q_length, seqLen-s_length, &score_array[warpID][0], 0);
+            #endif
         }
 
         int totalScore = gapped_left + gapped_right;
@@ -1569,16 +1841,5 @@ extern "C" {
     
     }
 
-    void copyConstantMemoryLUT(uint16_t * seedLUT, size_t seedLUTSize){
-        // Copy the bitmaskarraay to the constant memory
-        cudaMemcpyToSymbol( seed_holder, seedLUT , seedLUTSize*sizeof(uint16_t), 0, cudaMemcpyHostToDevice );
-
-        // Check for errors
-        cudaError_t error = cudaGetLastError();
-        if (error != cudaSuccess) {
-            std::cerr << "CUDA error in copyConstantMemory3: " << cudaGetErrorString(error) << std::endl;
-        }
-    
-    }
 
 }

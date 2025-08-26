@@ -35,7 +35,6 @@
 
 #include <algo/blast/core/blast_seqsrc.h>
 #include <algo/blast/core/blast_seqsrc_impl.h>
-//[SCG]
 #include <limits.h>
 
 
@@ -225,7 +224,7 @@ void BlastSeqSrcSetNumberOfThreads(BlastSeqSrc* seq_src, int n_threads)
 void BlastSeqSrcSetThreads(BlastSeqSrc* seq_src, int n_threads)
 {
 
-    seq_src->num_threads = n_threads; // [SCG] Setting the total number of threads!
+    seq_src->num_threads = n_threads; 
 
 }
 
@@ -351,9 +350,6 @@ BlastSeqSrcReleaseSequence(const BlastSeqSrc* seq_src,
     (*seq_src->ReleaseSequence)(seq_src->DataStructure, getseq_arg);
 }
 
-// Functions to add functions to make GPU implementation work
-// Also modifying the SetNumberOfThreads function to update the new object in the BlastSeqSrc structure
-// So make sure to update when migrating
 int BlastSeqSrcGetNumberOfThreads(BlastSeqSrc* seq_src)
 {
     if (!seq_src) {
@@ -493,8 +489,6 @@ void BlastSeqSrcWait(const BlastSeqSrc* seq_src)
             break;
         }
     }
-
-    // fprintf(stderr, "All threads have finished!\n");
 
 }
 

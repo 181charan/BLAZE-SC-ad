@@ -56,9 +56,6 @@ extern "C"
 
     void copyConstantMemory(uint8_t * gpuQuerybitmaskArray, size_t querybitmaskarray_gpu_size);
 
-    void copyConstantMemoryLUT(uint16_t * seedLUT, size_t seedLUTSize);
-
-
     void streamSynchronize(void *stream);
 
     void hostAlloc(void** pointer, size_t size) ;
